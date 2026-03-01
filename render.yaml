@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: attendify-backend
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: node dist/server.js
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false          # You'll paste this in Render dashboard
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: attendify-data
+      mountPath: /data
+      sizeGB: 1
