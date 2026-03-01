@@ -5,7 +5,7 @@ import path from "path";
 import fs from "fs";
 
 // Use /data/attendance.db on cloud (Render persistent disk), fallback to local
-const DB_PATH = process.env.DB_PATH || (process.env.NODE_ENV === 'production' ? '/data/attendance.db' : 'attendance.db');
+const DB_PATH = process.env.DB_PATH || 'attendance.db';
 const db = new Database(DB_PATH);
 
 // Initialize Database
