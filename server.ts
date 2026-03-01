@@ -1,11 +1,13 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
-import path from `path`;`nimport { fileURLToPath } from `url`;`nconst __filename = fileURLToPath(import.meta.url);`nconst __dirname = path.dirname(__filename);
-import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-// Use /data/attendance.db on cloud (Render persistent disk), fallback to local
-const DB_PATH = process.env.DB_PATH || `/tmp/attendance.db`;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DB_PATH = process.env.DB_PATH || "/tmp/attendance.db";
 const db = new Database(DB_PATH);
 
 // Initialize Database
@@ -33,7 +35,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     student_id INTEGER,
     date TEXT,
-    status TEXT, -- 'P' or 'A'
+    status TEXT,
     FOREIGN KEY (student_id) REFERENCES students(id)
   );
 `);
@@ -65,47 +67,41 @@ const passcodeMap: Record<string, string> = {
 if (!classCheck) {
   const classNames = ["Nursery", "LKG", "UKG", "Class 1", "Class 2", "Class 3", "Class 4", "Class 5", "Class 6", "Class 7", "Class 8", "Class 9", "Class 10", "Class 11", "Class 12"];
   const insertClass = db.prepare("INSERT INTO classes (name, section, passcode) VALUES (?, ?, ?)");
-  
   classNames.forEach(name => {
     const isHigherSecondary = name === "Class 11" || name === "Class 12";
     const sections = isHigherSecondary ? ["A"] : ["A", "B"];
-    
     sections.forEach(sec => {
       const passcode = passcodeMap[`${name}-${sec}`] || `${name.replace(" ", "")}-${sec}-123`.toUpperCase();
       insertClass.run(name, sec, passcode);
     });
   });
 } else {
-  // Update existing passcodes to match the new map
   const updatePasscode = db.prepare("UPDATE classes SET passcode = ? WHERE name = ? AND section = ?");
   Object.entries(passcodeMap).forEach(([key, code]) => {
     const [name, sec] = key.split("-");
     updatePasscode.run(code, name, sec);
   });
-  // Cleanup: Ensure Class 11 and 12 only have Section A if they were previously seeded with B
   db.prepare("DELETE FROM classes WHERE name IN ('Class 11', 'Class 12') AND section = 'B'").run();
 }
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '3000');
+  const PORT = parseInt(process.env.PORT || "3000");
 
-  // CORS - allow requests from Capacitor APK (capacitor://localhost, https://localhost)
+  // CORS for mobile APK
   app.use((req, res, next) => {
-    const origin = req.headers.origin || '';
-    const allowedOrigins = ['capacitor://localhost', 'https://localhost', 'http://localhost', 'http://10.0.2.2:3000'];
+    const origin = req.headers.origin || "";
+    const allowedOrigins = ["capacitor://localhost", "https://localhost", "http://localhost", "http://10.0.2.2:3000"];
     if (allowedOrigins.includes(origin) || !origin) {
-      res.setHeader('Access-Control-Allow-Origin', origin || '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+      res.setHeader("Access-Control-Allow-Origin", origin || "*");
+      res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+      res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
     }
-    if (req.method === 'OPTIONS') return res.sendStatus(200);
+    if (req.method === "OPTIONS") return res.sendStatus(200);
     next();
   });
 
   app.use(express.json());
-
-  // --- API Routes ---
 
   // Principal Remark
   app.get("/api/config/remark", (req, res) => {
@@ -119,7 +115,6 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Teacher Auth via Passcode
   app.post("/api/teacher/login", (req, res) => {
     const { passcode } = req.body;
     const classInfo = db.prepare("SELECT * FROM classes WHERE passcode = ?").get(passcode);
@@ -130,7 +125,6 @@ async function startServer() {
     }
   });
 
-  // Auth
   app.post("/api/admin/login", (req, res) => {
     const { password } = req.body;
     const adminPass = db.prepare("SELECT value FROM config WHERE key = 'admin_password'").get();
@@ -147,13 +141,11 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Classes
   app.get("/api/classes", (req, res) => {
     const classes = db.prepare("SELECT * FROM classes").all();
     res.json(classes);
   });
 
-  // Teacher Setup
   app.get("/api/config/:key", (req, res) => {
     const val = db.prepare("SELECT value FROM config WHERE key = ?").get(req.params.key);
     res.json(val || { value: null });
@@ -165,7 +157,6 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Students
   app.get("/api/students/:classId", (req, res) => {
     const students = db.prepare("SELECT * FROM students WHERE class_id = ?").all(req.params.classId);
     res.json(students);
@@ -189,7 +180,6 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Attendance
   app.get("/api/attendance/:classId/:date", (req, res) => {
     const { classId, date } = req.params;
     const records = db.prepare(`
@@ -202,18 +192,14 @@ async function startServer() {
   });
 
   app.post("/api/attendance", (req, res) => {
-    const { date, records } = req.body; // records: [{studentId, status}]
-    
-    // Server-side check for Sunday
-    const isSunday = new Date(date + 'T00:00:00').getDay() === 0;
+    const { date, records } = req.body;
+    const isSunday = new Date(date + "T00:00:00").getDay() === 0;
     if (isSunday) {
       return res.status(400).json({ success: false, message: "Cannot mark attendance on Sundays" });
     }
-
     const insert = db.prepare("INSERT OR REPLACE INTO attendance (student_id, date, status) VALUES (?, ?, ?)");
     const transaction = db.transaction((recs) => {
       for (const rec of recs) {
-        // First delete existing for this student and date to avoid duplicates if replace doesn't work as expected with non-unique constraints
         db.prepare("DELETE FROM attendance WHERE student_id = ? AND date = ?").run(rec.studentId, date);
         insert.run(rec.studentId, date, rec.status);
       }
@@ -222,55 +208,36 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // Reports
   app.get("/api/reports/:classId/:month", (req, res) => {
-    const { classId, month } = req.params; // month format: YYYY-MM
+    const { classId, month } = req.params;
     const students = db.prepare("SELECT * FROM students WHERE class_id = ?").all(classId);
     const report = students.map(student => {
       const attendance = db.prepare(`
         SELECT status, date FROM attendance 
         WHERE student_id = ? AND date LIKE ?
       `).all(student.id, `${month}%`);
-      
-      const presentCount = attendance.filter(a => a.status === 'P').length;
-      const absentCount = attendance.filter(a => a.status === 'A').length;
+      const presentCount = attendance.filter(a => a.status === "P").length;
+      const absentCount = attendance.filter(a => a.status === "A").length;
       const total = presentCount + absentCount;
       const percentage = total > 0 ? parseFloat(((presentCount / total) * 100).toFixed(1)) : 0;
-
-      return {
-        id: student.id,
-        name: student.name,
-        presentCount,
-        absentCount,
-        percentage,
-        records: attendance
-      };
+      return { id: student.id, name: student.name, presentCount, absentCount, percentage, records: attendance };
     });
     res.json(report);
   });
 
   app.get("/api/reports/yearly/:classId/:year", (req, res) => {
-    const { classId, year } = req.params; // year format: YYYY
+    const { classId, year } = req.params;
     const students = db.prepare("SELECT * FROM students WHERE class_id = ?").all(classId);
     const report = students.map(student => {
       const attendance = db.prepare(`
         SELECT status, date FROM attendance 
         WHERE student_id = ? AND date LIKE ?
       `).all(student.id, `${year}%`);
-      
-      const presentCount = attendance.filter(a => a.status === 'P').length;
-      const absentCount = attendance.filter(a => a.status === 'A').length;
+      const presentCount = attendance.filter(a => a.status === "P").length;
+      const absentCount = attendance.filter(a => a.status === "A").length;
       const total = presentCount + absentCount;
       const percentage = total > 0 ? parseFloat(((presentCount / total) * 100).toFixed(1)) : 0;
-
-      return {
-        id: student.id,
-        name: student.name,
-        presentCount,
-        absentCount,
-        percentage,
-        records: attendance
-      };
+      return { id: student.id, name: student.name, presentCount, absentCount, percentage, records: attendance };
     });
     res.json(report);
   });
@@ -284,17 +251,11 @@ async function startServer() {
         WHERE student_id = ?
         ORDER BY date ASC
       `).all(student.id);
-      
-      return {
-        id: student.id,
-        name: student.name,
-        records
-      };
+      return { id: student.id, name: student.name, records };
     });
     res.json(report);
   });
 
-  // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
