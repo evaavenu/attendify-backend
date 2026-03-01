@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import Database from "better-sqlite3";
-import path from "path";
+import path from `path`;`nimport { fileURLToPath } from `url`;`nconst __filename = fileURLToPath(import.meta.url);`nconst __dirname = path.dirname(__filename);
 import fs from "fs";
 
 // Use /data/attendance.db on cloud (Render persistent disk), fallback to local
