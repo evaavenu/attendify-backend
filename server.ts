@@ -88,7 +88,7 @@ if (!classCheck) {
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+  const PORT = parseInt(process.env.PORT || '3000');
 
   // CORS - allow requests from Capacitor APK (capacitor://localhost, https://localhost)
   app.use((req, res, next) => {
